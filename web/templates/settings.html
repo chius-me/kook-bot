@@ -1,0 +1,388 @@
+{{define "settings"}}{{template "head" .}}
+<h1>设置</h1>
+<p><a href="/">返回</a></p>
+<p id="page-err" role="alert"></p>
+
+<h2>机器人 Token</h2>
+<p id="identity">还没有 Token。</p>
+<form id="token-form">
+  <label for="token">Bot Token</label>
+  <input id="token" type="password" autocomplete="off" spellcheck="false">
+  <div class="actions">
+    <button type="submit">保存</button>
+    <button type="button" class="ghost" id="test-token">测试</button>
+    <button type="button" class="ghost" id="clear-token">清除</button>
+  </div>
+  <p id="token-err" role="alert"></p>
+</form>
+
+<h2>语音频道</h2>
+<form id="binding-form">
+  <label for="guild">服务器</label>
+  <select id="guild"></select>
+  <label for="voice">语音频道</label>
+  <select id="voice"></select>
+  <label for="room-password">房间密码</label>
+  <input id="room-password" type="password" autocomplete="new-password">
+  <p id="pw-state" class="hint"></p>
+  <p id="pw-hint" class="hint">留空则保留已保存的密码。频道没有密码时会自动清掉。</p>
+  <label for="text">文字频道（可选）</label>
+  <select id="text"></select>
+  <label class="inline" for="mirror"><input id="mirror" type="checkbox"> 把说过的话发到文字频道</label>
+  <p class="hint">默认关闭。频道里看到的发送者是机器人，正文会标明这是操作者让它说的那一句。</p>
+  <label for="format">镜像格式</label>
+  <select id="format">
+    <option value="kmarkdown">KMarkdown</option>
+    <option value="card">卡片</option>
+  </select>
+  <button type="submit">保存绑定</button>
+  <p id="bind-err" role="alert"></p>
+</form>
+
+<h2>语音合成</h2>
+<form id="tts-form">
+  <label for="provider">引擎</label>
+  <select id="provider">
+    <option value="edge">Edge（无需密钥）</option>
+    <option value="openai">OpenAI 兼容接口</option>
+  </select>
+  <label for="voice-id">音色</label>
+  <select id="voice-id"></select>
+  <label for="api-voice">接口音色</label>
+  <input id="api-voice" autocomplete="off">
+  <label for="rate">语速 <span id="rate-out"></span></label>
+  <input id="rate" type="range" min="0.5" max="2" step="0.05" value="1">
+  <label for="volume">音量 <span id="volume-out"></span></label>
+  <input id="volume" type="range" min="0.05" max="2" step="0.05" value="0.8">
+  <p class="hint">预置只填表，保存的是你确认后的地址，不会自动补路径。</p>
+  <div class="actions" id="presets"></div>
+  <label for="api-url">接口地址</label>
+  <input id="api-url" autocomplete="off" spellcheck="false">
+  <label for="api-model">模型</label>
+  <input id="api-model" autocomplete="off">
+  <label for="api-key">接口密钥</label>
+  <input id="api-key" type="password" autocomplete="new-password">
+  <p id="key-state" class="hint"></p>
+  <label for="preview-text">试听</label>
+  <input id="preview-text" maxlength="80" placeholder="最多 80 个字">
+  <div class="actions">
+    <button type="submit">保存语音</button>
+    <button type="button" class="ghost" id="preview">试听</button>
+  </div>
+  <p class="hint">微软返回 403 时，把镜像里的 edge-tts 升到仍可用的版本再重建，不要在程序里重写那套协议。</p>
+  <audio id="preview-audio" controls></audio>
+  <p id="tts-err" role="alert"></p>
+</form>
+<script>
+function csrf() {
+  const match = document.cookie.match(/(?:^|; )kookbot_csrf=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const body = await res.json().catch(() => ({}));
+  if (!body.ok) {
+    const msg = (body.data && body.data.kook_message) || (body.error && body.error.message) || "请求失败";
+    throw new Error(msg);
+  }
+  return body.data;
+}
+function showStatus(status) {
+  const line = document.getElementById("identity");
+  if (status.mismatch) {
+    line.textContent = "密钥已更换，需要重新填写 Token。";
+    return;
+  }
+  if (status.verified && status.identity) {
+    let gate = "网关未连接。";
+    if (status.gateway === "ready") gate = "网关已连接。";
+    if (status.gateway === "token_rejected") gate = "Token 已被拒绝，请重新填写。";
+    line.textContent = "已保存：" + status.identity.username + "#" + status.identity.identify_num + "。HTTP 凭证已验证，" + gate;
+    return;
+  }
+  if (status.token_set) {
+    line.textContent = status.last_kook_error || "Token 已保存，还没有验证通过。";
+    return;
+  }
+  line.textContent = "还没有 Token。";
+}
+function fill(select, items, selected, optional) {
+  select.replaceChildren();
+  const blank = document.createElement("option");
+  blank.value = "";
+  blank.textContent = optional ? "不发到文字频道" : "选择语音频道";
+  select.appendChild(blank);
+  for (const ch of items || []) {
+    const opt = document.createElement("option");
+    opt.value = ch.id;
+    let label = ch.name;
+    if (ch.parent_name) label = ch.parent_name + " / " + ch.name;
+    if (ch.has_password) label += "（有密码）";
+    opt.textContent = label;
+    if (ch.has_password) opt.dataset.password = "1";
+    select.appendChild(opt);
+  }
+  if (selected) select.value = selected;
+}
+function updatePasswordHint() {
+  const opt = document.getElementById("voice").selectedOptions[0];
+  const hint = document.getElementById("pw-hint");
+  if (opt && opt.dataset.password === "1") {
+    hint.textContent = "这个语音频道需要房间密码。留空则保留已保存的密码。";
+    return;
+  }
+  hint.textContent = "留空则保留已保存的密码。频道没有密码时会自动清掉。";
+}
+let channelReq = 0;
+async function loadChannels(guildId, binding) {
+  const voice = document.getElementById("voice");
+  const text = document.getElementById("text");
+  fill(voice, [], "", false);
+  fill(text, [], "", true);
+  if (!guildId) return;
+  const req = ++channelReq;
+  const data = await api("/api/guilds/" + encodeURIComponent(guildId) + "/channels");
+  if (req !== channelReq) return;
+  fill(voice, data.voice, binding && binding.voice_channel_id, false);
+  fill(text, data.text, binding && binding.text_channel_id, true);
+  updatePasswordHint();
+}
+async function loadGuilds(selected) {
+  const data = await api("/api/guilds");
+  const select = document.getElementById("guild");
+  select.replaceChildren();
+  const blank = document.createElement("option");
+  blank.value = "";
+  blank.textContent = "选择服务器";
+  select.appendChild(blank);
+  for (const guild of data.guilds || []) {
+    const opt = document.createElement("option");
+    opt.value = guild.id;
+    opt.textContent = guild.name;
+    select.appendChild(opt);
+  }
+  if (selected) select.value = selected;
+}
+async function boot() {
+  const page = document.getElementById("page-err");
+  page.textContent = "";
+  const status = await api("/api/status");
+  showStatus(status);
+  const binding = await api("/api/binding");
+  document.getElementById("mirror").checked = !!binding.mirror_enabled;
+  if (binding.mirror_format) document.getElementById("format").value = binding.mirror_format;
+  document.getElementById("pw-state").textContent = binding.voice_password_set ? "房间密码：已保存" : "房间密码：未设置";
+  if (!status.verified) {
+    fill(document.getElementById("voice"), [], "", false);
+    fill(document.getElementById("text"), [], "", true);
+    return;
+  }
+  await loadGuilds(binding.guild_id);
+  await loadChannels(binding.guild_id, binding);
+}
+document.getElementById("guild").addEventListener("change", async () => {
+  const err = document.getElementById("bind-err");
+  err.textContent = "";
+  try {
+    await loadChannels(document.getElementById("guild").value, null);
+  } catch (e) {
+    err.textContent = e.message || "加载频道失败";
+  }
+});
+document.getElementById("voice").addEventListener("change", updatePasswordHint);
+document.getElementById("token-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const err = document.getElementById("token-err");
+  err.textContent = "";
+  const token = document.getElementById("token").value.trim();
+  if (!token) {
+    err.textContent = "先粘贴 Token";
+    return;
+  }
+  try {
+    await api("/api/token", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()},
+      body: JSON.stringify({token})
+    });
+    document.getElementById("token").value = "";
+    await boot();
+  } catch (e) {
+    err.textContent = e.message || "保存失败";
+  }
+});
+document.getElementById("test-token").addEventListener("click", async () => {
+  const err = document.getElementById("token-err");
+  err.textContent = "";
+  const token = document.getElementById("token").value.trim();
+  const payload = token ? {token: token} : {};
+  try {
+    const data = await api("/api/token/test", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()},
+      body: JSON.stringify(payload)
+    });
+    if (token) {
+      document.getElementById("identity").textContent = "测试通过：" + data.username + "#" + data.identify_num + "。这一次没有保存。";
+      return;
+    }
+    await boot();
+  } catch (e) {
+    err.textContent = e.message || "测试失败";
+  }
+});
+document.getElementById("clear-token").addEventListener("click", async () => {
+  const err = document.getElementById("token-err");
+  err.textContent = "";
+  if (!window.confirm("清除已保存的 Token？")) return;
+  try {
+    await api("/api/token", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()},
+      body: JSON.stringify({token: ""})
+    });
+    document.getElementById("token").value = "";
+    await boot();
+  } catch (e) {
+    err.textContent = e.message || "清除失败";
+  }
+});
+document.getElementById("binding-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const err = document.getElementById("bind-err");
+  err.textContent = "";
+  const payload = {
+    guild_id: document.getElementById("guild").value,
+    voice_channel_id: document.getElementById("voice").value,
+    text_channel_id: document.getElementById("text").value,
+    mirror_enabled: document.getElementById("mirror").checked,
+    mirror_format: document.getElementById("format").value
+  };
+  const pw = document.getElementById("room-password").value;
+  if (pw !== "") payload.voice_password = pw;
+  try {
+    await api("/api/binding", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()},
+      body: JSON.stringify(payload)
+    });
+    document.getElementById("room-password").value = "";
+    err.textContent = "已保存";
+    await boot();
+  } catch (e) {
+    err.textContent = e.message || "保存失败";
+  }
+});
+const rate = document.getElementById("rate");
+const volume = document.getElementById("volume");
+function showRange() {
+  document.getElementById("rate-out").textContent = rate.value;
+  document.getElementById("volume-out").textContent = volume.value;
+}
+rate.addEventListener("input", showRange);
+volume.addEventListener("input", showRange);
+showRange();
+let edgeVoices = [];
+function fillVoices(selected) {
+  const select = document.getElementById("voice-id");
+  select.replaceChildren();
+  for (const voice of edgeVoices) {
+    const opt = document.createElement("option");
+    opt.value = voice.id;
+    opt.textContent = voice.alias;
+    select.appendChild(opt);
+  }
+  if (selected) select.value = selected;
+}
+async function loadTTS() {
+  const data = await api("/api/tts");
+  document.getElementById("provider").value = data.provider || "edge";
+  edgeVoices = data.voices || [];
+  fillVoices(data.edge_voice);
+  document.getElementById("api-voice").value = data.api_voice || "";
+  document.getElementById("api-url").value = data.api_url || "";
+  document.getElementById("api-model").value = data.api_model || "";
+  rate.value = data.rate || 1;
+  volume.value = data.volume || 0.8;
+  showRange();
+  document.getElementById("key-state").textContent = data.api_key_set ? "接口密钥：已保存" : "接口密钥：未设置";
+  const box = document.getElementById("presets");
+  box.replaceChildren();
+  for (const preset of data.presets || []) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost";
+    button.textContent = preset.name;
+    button.addEventListener("click", () => {
+      document.getElementById("provider").value = "openai";
+      document.getElementById("api-url").value = preset.url;
+      document.getElementById("api-model").value = preset.model;
+      document.getElementById("api-voice").value = preset.voice;
+    });
+    box.appendChild(button);
+  }
+}
+document.getElementById("tts-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const err = document.getElementById("tts-err");
+  err.textContent = "";
+  const payload = {
+    provider: document.getElementById("provider").value,
+    edge_voice: document.getElementById("voice-id").value,
+    api_voice: document.getElementById("api-voice").value.trim(),
+    rate: Number(rate.value),
+    volume: Number(volume.value),
+    api_url: document.getElementById("api-url").value.trim(),
+    api_model: document.getElementById("api-model").value.trim()
+  };
+  const key = document.getElementById("api-key").value;
+  if (key !== "") payload.api_key = key;
+  try {
+    await api("/api/tts", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()},
+      body: JSON.stringify(payload)
+    });
+    document.getElementById("api-key").value = "";
+    err.textContent = "已保存";
+    await loadTTS();
+  } catch (e) {
+    err.textContent = e.message || "保存失败";
+  }
+});
+document.getElementById("preview").addEventListener("click", async () => {
+  const err = document.getElementById("tts-err");
+  err.textContent = "";
+  const text = document.getElementById("preview-text").value.trim();
+  if (!text) {
+    err.textContent = "先写一句试听";
+    return;
+  }
+  try {
+    const res = await fetch("/api/tts/preview", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()},
+      body: JSON.stringify({
+        text: text,
+        voice_id: document.getElementById("provider").value === "openai" ? document.getElementById("api-voice").value.trim() : document.getElementById("voice-id").value,
+        provider: document.getElementById("provider").value,
+        rate: Number(rate.value)
+      })
+    });
+    if (!res.ok || (res.headers.get("content-type") || "").indexOf("audio") === -1) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body.error && body.error.message) || "试听失败");
+    }
+    const blob = await res.blob();
+    const audio = document.getElementById("preview-audio");
+    audio.src = URL.createObjectURL(blob);
+    await audio.play();
+  } catch (e) {
+    err.textContent = e.message || "试听失败";
+  }
+});
+boot().then(loadTTS).catch((e) => {
+  document.getElementById("page-err").textContent = e.message || "加载失败";
+});
+</script>
+{{template "foot" .}}{{end}}

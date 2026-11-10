@@ -1,0 +1,33 @@
+{{define "home"}}{{template "head" .}}
+<h1>kookbot</h1>
+<p>已登录。</p>
+<p>{{.Line}}</p>
+{{if .Avatar}}<p><img src="{{.Avatar}}" alt="" width="64" height="64"></p>{{end}}
+{{if .Identity}}<p>{{.Identity}}</p>{{end}}
+{{if .GatewayLabel}}<p>网关：{{.GatewayLabel}}</p>{{end}}
+{{if .VoiceLabel}}<p>语音：{{.VoiceLabel}}</p>{{end}}
+{{if .Err}}<p role="alert">{{.Err}}</p>{{end}}
+<p><a href="/speak">代说</a> · <a href="/settings">设置</a></p>
+<button type="button" id="logout">退出</button>
+<p id="err" role="alert"></p>
+<script>
+function csrf() {
+  const match = document.cookie.match(/(?:^|; )kookbot_csrf=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+document.getElementById("logout").addEventListener("click", async () => {
+  const err = document.getElementById("err");
+  err.textContent = "";
+  const res = await fetch("/api/logout", {
+    method: "POST",
+    headers: {"X-CSRF-Token": csrf()}
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    err.textContent = (body.error && body.error.message) || "退出失败";
+    return;
+  }
+  location.href = "/login";
+});
+</script>
+{{template "foot" .}}{{end}}

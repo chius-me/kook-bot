@@ -1,0 +1,35 @@
+{{define "login"}}{{template "head" .}}
+<h1>kookbot</h1>
+<p>输入操作者密码。</p>
+<form id="login">
+  <label for="password">密码</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+  <button type="submit">登录</button>
+  <p id="err" role="alert"></p>
+</form>
+<script>
+document.getElementById("login").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const password = new FormData(event.target).get("password");
+  const err = document.getElementById("err");
+  err.textContent = "";
+  let res;
+  try {
+    res = await fetch("/api/login", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({password})
+    });
+  } catch (e) {
+    err.textContent = "网络错误";
+    return;
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    err.textContent = (body.error && body.error.message) || "登录失败";
+    return;
+  }
+  location.href = "/";
+});
+</script>
+{{template "foot" .}}{{end}}

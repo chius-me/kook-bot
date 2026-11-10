@@ -3,10 +3,12 @@
 
 # Binary
 bsdx
+kookbot
 *.exe
 
 # Runtime
 session.pid
+/data/
 
 # Design docs (local only)
 docs/

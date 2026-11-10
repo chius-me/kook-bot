@@ -1,0 +1,102 @@
+:root {
+  color-scheme: light dark;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 40rem;
+  margin: 4rem auto;
+  padding: 0 1.25rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  font-weight: 650;
+  margin: 0 0 0.5rem;
+}
+
+h2 {
+  font-size: 1.05rem;
+  margin: 1.75rem 0 0;
+}
+
+a {
+  color: inherit;
+}
+
+form {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+label {
+  font-size: 0.9rem;
+}
+
+input, select, textarea {
+  font: inherit;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid color-mix(in srgb, CanvasText 30%, transparent);
+  border-radius: 0.4rem;
+  background: Canvas;
+  color: CanvasText;
+}
+
+textarea {
+  min-height: 6rem;
+  resize: vertical;
+}
+
+label.inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: color-mix(in srgb, CanvasText 70%, transparent);
+}
+
+button {
+  font: inherit;
+  padding: 0.55rem 0.9rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: CanvasText;
+  color: Canvas;
+  justify-self: start;
+  cursor: pointer;
+}
+
+button.ghost {
+  background: transparent;
+  color: CanvasText;
+  border: 1px solid color-mix(in srgb, CanvasText 30%, transparent);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid CanvasText;
+  outline-offset: 2px;
+}
+
+#err {
+  min-height: 1.5rem;
+  margin: 0;
+}

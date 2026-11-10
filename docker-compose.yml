@@ -1,0 +1,17 @@
+services:
+  kookbot:
+    build: .
+    image: ${KOOKBOT_IMAGE:-kookbot}:${KOOKBOT_IMAGE_TAG:?set KOOKBOT_IMAGE_TAG to the git short SHA}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8765:8765"
+    environment:
+      KOOKBOT_HTTP_ADDR: 0.0.0.0:8765
+      KOOKBOT_SECRET: ${KOOKBOT_SECRET:?}
+      KOOKBOT_UI_PASSWORD: ${KOOKBOT_UI_PASSWORD:?}
+      TZ: Asia/Shanghai
+    volumes:
+      - kookbot-data:/data
+
+volumes:
+  kookbot-data:

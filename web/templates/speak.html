@@ -1,0 +1,113 @@
+{{define "speak"}}{{template "head" .}}
+<h1>代说</h1>
+<p><a href="/">返回</a> · <a href="/settings">设置</a></p>
+<p id="room">语音：空闲</p>
+<p id="summary" class="hint"></p>
+<form id="speak-form">
+  <label for="text">要说的话</label>
+  <textarea id="text" maxlength="200" placeholder="最多 200 个字"></textarea>
+  <button type="submit">发送</button>
+  <p id="speak-err" role="alert"></p>
+</form>
+<p id="hint" class="hint"></p>
+<h2>正在播放</h2>
+<p id="now">现在没有在说。</p>
+<div class="actions">
+  <button type="button" id="skip">跳过</button>
+  <button type="button" class="ghost" id="stop">停止</button>
+  <button type="button" class="ghost" id="leave">离开频道</button>
+</div>
+<h2>队列</h2>
+<ul id="queue"></ul>
+<h2>频道里的人</h2>
+<ul id="roster"></ul>
+<h2>最近</h2>
+<ul id="history"></ul>
+<script>
+function csrf() {
+  const match = document.cookie.match(/(?:^|; )kookbot_csrf=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const body = await res.json().catch(() => ({}));
+  if (!body.ok) {
+    const msg = (body.error && body.error.message) || "请求失败";
+    throw new Error(msg);
+  }
+  return body.data;
+}
+function item(text) {
+  const li = document.createElement("li");
+  li.textContent = text;
+  return li;
+}
+async function refresh() {
+  const voice = await api("/api/voice");
+  document.getElementById("room").textContent = "语音：" + (voice.state_label || "空闲");
+  const now = document.getElementById("now");
+  if (voice.now_playing) {
+    now.textContent = voice.now_playing.text + "（" + voice.now_playing.status + "）";
+    document.getElementById("hint").textContent = voice.now_playing.ui_hint || "";
+  } else {
+    now.textContent = "现在没有在说。";
+    document.getElementById("hint").textContent = "";
+  }
+  const queue = document.getElementById("queue");
+  queue.replaceChildren();
+  for (const job of voice.queue || []) queue.appendChild(item(job.text));
+  if (!(voice.queue || []).length) queue.appendChild(item("队列是空的"));
+  const roster = document.getElementById("roster");
+  roster.replaceChildren();
+  for (const person of voice.roster || []) roster.appendChild(item(person.name || person.id));
+  if (!(voice.roster || []).length) roster.appendChild(item("还没有名单"));
+  const data = await api("/api/speak/queue");
+  const history = document.getElementById("history");
+  history.replaceChildren();
+  for (const job of data.history || []) {
+    const extra = job.error ? " — " + job.error : "";
+    history.appendChild(item(job.text + "（" + job.status + "）" + extra));
+  }
+  const tts = await api("/api/tts");
+  const voiceName = (tts.voices || []).find((row) => row.id === tts.edge_voice);
+  const alias = voiceName ? voiceName.alias : (tts.api_voice || tts.edge_voice || "");
+  document.getElementById("summary").textContent = "当前：" + (tts.provider || "edge") + " / " + alias + " / 语速 " + tts.rate;
+}
+document.getElementById("speak-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const err = document.getElementById("speak-err");
+  err.textContent = "";
+  const text = document.getElementById("text").value.trim();
+  try {
+    await api("/api/speak", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()},
+      body: JSON.stringify({text: text})
+    });
+    document.getElementById("text").value = "";
+    await refresh();
+  } catch (e) {
+    err.textContent = e.message || "发送失败";
+  }
+});
+async function act(path) {
+  const err = document.getElementById("speak-err");
+  err.textContent = "";
+  try {
+    await api(path, {method: "POST", headers: {"X-CSRF-Token": csrf()}});
+    await refresh();
+  } catch (e) {
+    err.textContent = e.message || "操作失败";
+  }
+}
+document.getElementById("skip").addEventListener("click", () => act("/api/speak/skip"));
+document.getElementById("stop").addEventListener("click", () => act("/api/speak/stop"));
+document.getElementById("leave").addEventListener("click", () => act("/api/voice/leave"));
+refresh().catch((e) => {
+  document.getElementById("speak-err").textContent = e.message || "加载失败";
+});
+setInterval(() => {
+  refresh().catch(() => {});
+}, 3000);
+</script>
+{{template "foot" .}}{{end}}
